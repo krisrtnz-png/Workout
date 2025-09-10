@@ -16,6 +16,7 @@
         let userId;
         let userDocRef;
         let unsubscribe;
+        let isAuthReady = false;
 
         // Workout data for each day type, split into compound and isolated exercises
         const workoutData = {
@@ -124,34 +125,50 @@
                     await signInAnonymously(auth);
                 }
                 
-                // Get the user's UID from authentication
                 const authUid = auth.currentUser.uid;
-                
-                // Get the user-defined ID from local storage
                 const savedUserId = localStorage.getItem('workoutAppUserId');
                 
                 if (savedUserId) {
                     setUserId(savedUserId, authUid);
                 } else {
-                    // If no user ID is saved, use a random one and set the input field
                     const newId = `user_${Math.random().toString(36).substr(2, 9)}`;
                     document.getElementById('userIdInput').value = newId;
                     setUserId(newId, authUid);
                 }
+                
+                // Once authenticated, update the UI state
+                isAuthReady = true;
+                updateButtonState();
+                showMessage('Connection successful! You can now save your user ID.', 'success');
             });
         };
 
+        // Function to update the button states based on auth readiness
+        function updateButtonState() {
+            const saveBtn = document.getElementById('saveUserIdBtn');
+            const dayBtns = document.querySelectorAll('.day-btn');
+            
+            saveBtn.disabled = !isAuthReady;
+            saveBtn.classList.toggle('opacity-50', !isAuthReady);
+            
+            dayBtns.forEach(btn => {
+                btn.disabled = !isAuthReady;
+                btn.classList.toggle('opacity-50', !isAuthReady);
+            });
+        }
+        window.updateButtonState = updateButtonState;
+
         // Function to save the user ID
         window.saveUserId = () => {
+            if (!isAuthReady) {
+                showMessage('Connecting to the database. Please wait a moment.', 'error');
+                return;
+            }
             const inputId = document.getElementById('userIdInput').value.trim();
             if (inputId) {
                 localStorage.setItem('workoutAppUserId', inputId);
-                if (auth.currentUser) {
-                    setUserId(inputId, auth.currentUser.uid);
-                    showMessage('User ID saved! Your workouts are now synced.', 'success');
-                } else {
-                    showMessage('Please wait for initialization before saving.', 'error');
-                }
+                setUserId(inputId, auth.currentUser.uid);
+                showMessage('User ID saved! Your workouts are now synced.', 'success');
             } else {
                 showMessage('Please enter a user ID.', 'error');
             }
@@ -165,11 +182,8 @@
             userId = localStorageId;
             document.getElementById('userIdDisplay').innerText = `User ID: ${userId}`;
             
-            // Reference to the user's document, using the Firebase UID and local storage ID
             userDocRef = doc(db, `artifacts/${appId}/users/${authUid}/data/${localStorageId}`);
-            console.log("Firestore path:", userDocRef.path);
-
-            // Attach a listener to the user's document
+            
             unsubscribe = onSnapshot(userDocRef, (doc) => {
                 if (doc.exists()) {
                     const data = doc.data();
@@ -183,16 +197,14 @@
                 console.error("Error listening to state:", error);
             });
         }
-        window.setUserId = setUserId;
 
         // Saves the selected day to Firestore
         async function selectDay(dayName) {
             if (!userDocRef) {
-                showMessage('Please set your User ID first.', 'error');
+                showMessage('Connection not ready. Please set your User ID first.', 'error');
                 return;
             }
             try {
-                // Default to 'compound' exercises if not yet set
                 await setDoc(userDocRef, { currentDay: dayName, currentType: 'compound' }, { merge: true });
             } catch (error) {
                 console.error("Error saving day to Firestore:", error);
@@ -204,7 +216,7 @@
         // Saves the selected exercise type to Firestore
         async function selectExerciseType(type) {
             if (!userDocRef) {
-                showMessage('Please set your User ID first.', 'error');
+                showMessage('Connection not ready. Please set your User ID first.', 'error');
                 return;
             }
             try {
@@ -294,39 +306,39 @@
         <!-- Header Section -->
         <header class="text-center mb-4">
             <h1 class="text-4xl md:text-5xl font-extrabold text-white mb-2">My Weekly Plan</h1>
-            <p id="userIdDisplay" class="text-sm text-gray-400 font-mono tracking-wide">Initializing...</p>
+            <p id="userIdDisplay" class="text-sm text-gray-400 font-mono tracking-wide">Connecting...</p>
             <p class="text-lg md:text-xl text-gray-300 mt-2">Set your ID to sync your plan across devices.</p>
         </header>
 
         <!-- User ID Section -->
         <section class="bg-gray-700 p-6 rounded-xl shadow-inner flex flex-col space-y-4 md:flex-row md:space-y-0 md:space-x-4 items-center">
             <input id="userIdInput" type="text" placeholder="Enter your unique ID here" class="flex-1 bg-gray-900 text-white placeholder-gray-400 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <button onclick="saveUserId()" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold shadow-lg hover:bg-blue-700 transition-colors duration-200 w-full md:w-auto">
+            <button id="saveUserIdBtn" onclick="saveUserId()" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold shadow-lg hover:bg-blue-700 transition-colors duration-200 w-full md:w-auto disabled:opacity-50 disabled:cursor-not-allowed">
                 Save User ID
             </button>
         </section>
 
         <!-- Day Selection Buttons -->
         <section class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-            <button onclick="selectDay('Push Day')" data-day="Push Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+            <button onclick="selectDay('Push Day')" data-day="Push Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                 Monday (Push)
             </button>
-            <button onclick="selectDay('Pull Day')" data-day="Pull Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+            <button onclick="selectDay('Pull Day')" data-day="Pull Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                 Tuesday (Pull)
             </button>
-            <button onclick="selectDay('Leg Day')" data-day="Leg Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+            <button onclick="selectDay('Leg Day')" data-day="Leg Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                 Wednesday (Legs)
             </button>
-            <button onclick="selectDay('Push Day')" data-day="Push Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+            <button onclick="selectDay('Push Day')" data-day="Push Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                 Thursday (Push)
             </button>
-            <button onclick="selectDay('Pull Day')" data-day="Pull Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+            <button onclick="selectDay('Pull Day')" data-day="Pull Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                 Friday (Pull)
             </button>
-            <button onclick="selectDay('Spin Class')" data-day="Spin Class" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+            <button onclick="selectDay('Spin Class')" data-day="Spin Class" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                 Saturday (Cardio)
             </button>
-            <button onclick="selectDay('Rest Day')" data-day="Rest Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+            <button onclick="selectDay('Rest Day')" data-day="Rest Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                 Sunday (Rest)
             </button>
         </section>
