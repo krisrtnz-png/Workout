@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weekly Workout Plan</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables for Firebase and user
+        let db;
+        let auth;
+        let userId;
+        let userDocRef;
+        let unsubscribe;
+
+        // Workout data for each day type, split into compound and isolated exercises
+        const workoutData = {
+            'Push Day': {
+                compound: [
+                    { name: 'Barbell Bench Press', sets: 4, reps: 8 },
+                    { name: 'Overhead Press', sets: 4, reps: 8 },
+                    { name: 'Incline Dumbbell Press', sets: 3, reps: 10 },
+                    { name: 'Dips', sets: 3, reps: 'AMRAP' },
+                    { name: 'Seated Dumbbell Shoulder Press', sets: 3, reps: 10 },
+                    { name: 'Push-ups', sets: 3, reps: 'AMRAP' },
+                    { name: 'Close-Grip Bench Press', sets: 3, reps: 12 },
+                    { name: 'Military Press', sets: 4, reps: 8 },
+                    { name: 'Landmine Press', sets: 3, reps: 10 },
+                    { name: 'Decline Bench Press', sets: 3, reps: 12 }
+                ],
+                isolated: [
+                    { name: 'Tricep Rope Pushdowns', sets: 4, reps: 15 },
+                    { name: 'Lateral Raises', sets: 4, reps: 15 },
+                    { name: 'Overhead Tricep Extensions', sets: 3, reps: 12 },
+                    { name: 'Front Raises', sets: 3, reps: 15 },
+                    { name: 'Tricep Skullcrushers', sets: 3, reps: 12 },
+                    { name: 'Cable Cross-Overs', sets: 3, reps: 15 },
+                    { name: 'Dumbbell Flys', sets: 3, reps: 15 },
+                    { name: 'Single-Arm Cable Pushdowns', sets: 3, reps: 15 },
+                    { name: 'Arnold Press', sets: 3, reps: 12 },
+                    { name: 'Reverse Pec Deck', sets: 3, reps: 15 }
+                ]
+            },
+            'Pull Day': {
+                compound: [
+                    { name: 'Pull-ups', sets: 4, reps: 'AMRAP' },
+                    { name: 'Barbell Rows', sets: 4, reps: 8 },
+                    { name: 'Lat Pulldowns', sets: 3, reps: 10 },
+                    { name: 'Deadlifts', sets: 3, reps: 5 },
+                    { name: 'Seated Cable Rows', sets: 3, reps: 10 },
+                    { name: 'T-Bar Rows', sets: 3, reps: 10 },
+                    { name: 'Chin-ups', sets: 3, reps: 'AMRAP' },
+                    { name: 'Dumbbell Rows', sets: 4, reps: 10 },
+                    { name: 'Rack Pulls', sets: 3, reps: 8 },
+                    { name: 'Pendlay Rows', sets: 3, reps: 10 }
+                ],
+                isolated: [
+                    { name: 'Barbell Bicep Curls', sets: 4, reps: 12 },
+                    { name: 'Hammer Curls', sets: 3, reps: 12 },
+                    { name: 'Face Pulls', sets: 3, reps: 15 },
+                    { name: 'Rear Delt Flys', sets: 3, reps: 15 },
+                    { name: 'Shrugs', sets: 3, reps: 15 },
+                    { name: 'Preacher Curls', sets: 3, reps: 12 },
+                    { name: 'Concentration Curls', sets: 3, reps: 12 },
+                    { name: 'Reverse Curls', sets: 3, reps: 15 },
+                    { name: 'Cable Pullovers', sets: 3, reps: 15 },
+                    { name: 'Machine Shrugs', sets: 3, reps: 15 }
+                ]
+            },
+            'Leg Day': {
+                compound: [
+                    { name: 'Barbell Squats', sets: 4, reps: 8 },
+                    { name: 'Romanian Deadlifts', sets: 4, reps: 8 },
+                    { name: 'Leg Press', sets: 3, reps: 10 },
+                    { name: 'Hip Thrusts', sets: 4, reps: 12 },
+                    { name: 'Walking Lunges', sets: 3, reps: '10/side' },
+                    { name: 'Goblet Squats', sets: 3, reps: 12 },
+                    { name: 'Bulgarian Split Squats', sets: 3, reps: '10/side' },
+                    { name: 'Good Mornings', sets: 3, reps: 12 },
+                    { name: 'Hack Squats', sets: 3, reps: 10 },
+                    { name: 'Box Squats', sets: 3, reps: 8 }
+                ],
+                isolated: [
+                    { name: 'Leg Extensions', sets: 4, reps: 15 },
+                    { name: 'Hamstring Curls', sets: 4, reps: 15 },
+                    { name: 'Standing Calf Raises', sets: 3, reps: 20 },
+                    { name: 'Seated Calf Raises', sets: 3, reps: 20 },
+                    { name: 'Adductor Machine', sets: 3, reps: 15 },
+                    { name: 'Abductor Machine', sets: 3, reps: 15 },
+                    { name: 'Single-Leg Extensions', sets: 3, reps: 12 },
+                    { name: 'Single-Leg Hamstring Curls', sets: 3, reps: 12 },
+                    { name: 'Glute Kickbacks', sets: 3, reps: 15 },
+                    { name: 'Step-ups', sets: 3, reps: '12/side' }
+                ]
+            },
+            'Spin Class': {
+                compound: [{ name: 'Spin Class', sets: 1, reps: '60 min' }],
+                isolated: [{ name: 'Spin Class', sets: 1, reps: '60 min' }]
+            },
+            'Rest Day': {
+                compound: [{ name: 'Rest and Recovery', sets: 'N/A', reps: 'N/A' }],
+                isolated: [{ name: 'Rest and Recovery', sets: 'N/A', reps: 'N/A' }]
+            }
+        };
+
+        // Configuration and app ID from the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+
+        // Initialize Firebase and Auth listener on window load
+        window.onload = async () => {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            // Set up a listener to handle authentication state changes
+            onAuthStateChanged(auth, async (user) => {
+                if (!user) {
+                    // Sign in anonymously if not already authenticated
+                    await signInAnonymously(auth);
+                }
+                
+                // Get the user's UID from authentication
+                const authUid = auth.currentUser.uid;
+                
+                // Get the user-defined ID from local storage
+                const savedUserId = localStorage.getItem('workoutAppUserId');
+                
+                if (savedUserId) {
+                    setUserId(savedUserId, authUid);
+                } else {
+                    // If no user ID is saved, use a random one and set the input field
+                    const newId = `user_${Math.random().toString(36).substr(2, 9)}`;
+                    document.getElementById('userIdInput').value = newId;
+                    setUserId(newId, authUid);
+                }
+            });
+        };
+
+        // Function to save the user ID
+        window.saveUserId = () => {
+            const inputId = document.getElementById('userIdInput').value.trim();
+            if (inputId) {
+                localStorage.setItem('workoutAppUserId', inputId);
+                if (auth.currentUser) {
+                    setUserId(inputId, auth.currentUser.uid);
+                    showMessage('User ID saved! Your workouts are now synced.', 'success');
+                } else {
+                    showMessage('Please wait for initialization before saving.', 'error');
+                }
+            } else {
+                showMessage('Please enter a user ID.', 'error');
+            }
+        };
+
+        // Attaches a real-time listener to the user's data
+        function setUserId(localStorageId, authUid) {
+            if (unsubscribe) {
+                unsubscribe();
+            }
+            userId = localStorageId;
+            document.getElementById('userIdDisplay').innerText = `User ID: ${userId}`;
+            
+            // Reference to the user's document, using the Firebase UID and local storage ID
+            userDocRef = doc(db, `artifacts/${appId}/users/${authUid}/data/${localStorageId}`);
+            console.log("Firestore path:", userDocRef.path);
+
+            // Attach a listener to the user's document
+            unsubscribe = onSnapshot(userDocRef, (doc) => {
+                if (doc.exists()) {
+                    const data = doc.data();
+                    if (data.currentDay) {
+                        loadExercises(data.currentDay, data.currentType);
+                        updateActiveButton(data.currentDay, data.currentType);
+                        document.getElementById('exerciseTypeButtons').classList.remove('hidden');
+                    }
+                }
+            }, (error) => {
+                console.error("Error listening to state:", error);
+            });
+        }
+        window.setUserId = setUserId;
+
+        // Saves the selected day to Firestore
+        async function selectDay(dayName) {
+            if (!userDocRef) {
+                showMessage('Please set your User ID first.', 'error');
+                return;
+            }
+            try {
+                // Default to 'compound' exercises if not yet set
+                await setDoc(userDocRef, { currentDay: dayName, currentType: 'compound' }, { merge: true });
+            } catch (error) {
+                console.error("Error saving day to Firestore:", error);
+                showMessage('Could not save day selection.', 'error');
+            }
+        }
+        window.selectDay = selectDay;
+
+        // Saves the selected exercise type to Firestore
+        async function selectExerciseType(type) {
+            if (!userDocRef) {
+                showMessage('Please set your User ID first.', 'error');
+                return;
+            }
+            try {
+                const docSnap = await getDoc(userDocRef);
+                const currentDay = docSnap.exists() ? docSnap.data().currentDay : null;
+                if (currentDay) {
+                    await setDoc(userDocRef, { currentDay, currentType: type }, { merge: true });
+                }
+            } catch (error) {
+                console.error("Error saving exercise type to Firestore:", error);
+                showMessage('Could not save exercise type.', 'error');
+            }
+        }
+        window.selectExerciseType = selectExerciseType;
+
+        // Dynamically loads the exercises for the selected day and type
+        function loadExercises(dayName, exerciseType) {
+            const exerciseContainer = document.getElementById('exerciseContainer');
+            exerciseContainer.innerHTML = ''; 
+
+            const exercises = workoutData[dayName][exerciseType] || [];
+            if (exercises.length === 0) {
+                exerciseContainer.innerHTML = `<p class="text-gray-400">No exercises found for this day.</p>`;
+                return;
+            }
+
+            exercises.forEach(exercise => {
+                const item = document.createElement('div');
+                item.className = 'bg-gray-700 p-4 rounded-xl shadow-md transition-all duration-300 transform hover:scale-105';
+                item.innerHTML = `
+                    <h3 class="text-xl font-bold text-white">${exercise.name}</h3>
+                    <p class="text-gray-300">Sets: ${exercise.sets}</p>
+                    <p class="text-gray-300">Reps: ${exercise.reps}</p>
+                `;
+                exerciseContainer.appendChild(item);
+            });
+        }
+
+        // Updates the active button style
+        function updateActiveButton(activeDay, activeType) {
+            // Update day buttons
+            const dayButtons = document.querySelectorAll('.day-btn');
+            dayButtons.forEach(btn => {
+                btn.classList.remove('bg-blue-600', 'hover:bg-blue-700', 'scale-105');
+                btn.classList.add('bg-gray-700', 'hover:bg-gray-600');
+                if (btn.getAttribute('data-day') === activeDay) {
+                    btn.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+                    btn.classList.add('bg-blue-600', 'hover:bg-blue-700', 'scale-105');
+                }
+            });
+            // Update exercise type buttons
+            const typeButtons = document.querySelectorAll('.type-btn');
+            typeButtons.forEach(btn => {
+                btn.classList.remove('bg-blue-600', 'hover:bg-blue-700', 'scale-105');
+                btn.classList.add('bg-gray-700', 'hover:bg-gray-600');
+                if (btn.getAttribute('data-type') === activeType) {
+                    btn.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+                    btn.classList.add('bg-blue-600', 'hover:bg-blue-700', 'scale-105');
+                }
+            });
+        }
+
+        // Displays a temporary message box
+        function showMessage(message, type) {
+            const messageBox = document.getElementById('messageBox');
+            messageBox.innerText = message;
+            messageBox.className = 'absolute top-4 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full text-white shadow-lg transition-transform duration-300 transform';
+            if (type === 'success') {
+                messageBox.classList.add('bg-green-500', 'scale-100');
+            } else {
+                messageBox.classList.add('bg-red-500', 'scale-100');
+            }
+            setTimeout(() => {
+                messageBox.classList.remove('scale-100');
+                messageBox.classList.add('scale-0');
+            }, 3000);
+        }
+        window.showMessage = showMessage;
+    </script>
+</head>
+<body class="bg-gray-900 text-white font-sans antialiased p-6 flex flex-col items-center min-h-screen relative">
+    
+    <!-- Message Box -->
+    <div id="messageBox" class="absolute top-4 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full text-white shadow-lg transition-transform duration-300 transform scale-0 z-50"></div>
+
+    <main class="w-full max-w-4xl p-8 bg-gray-800 rounded-2xl shadow-2xl flex flex-col space-y-8">
+        <!-- Header Section -->
+        <header class="text-center mb-4">
+            <h1 class="text-4xl md:text-5xl font-extrabold text-white mb-2">My Weekly Plan</h1>
+            <p id="userIdDisplay" class="text-sm text-gray-400 font-mono tracking-wide">Initializing...</p>
+            <p class="text-lg md:text-xl text-gray-300 mt-2">Set your ID to sync your plan across devices.</p>
+        </header>
+
+        <!-- User ID Section -->
+        <section class="bg-gray-700 p-6 rounded-xl shadow-inner flex flex-col space-y-4 md:flex-row md:space-y-0 md:space-x-4 items-center">
+            <input id="userIdInput" type="text" placeholder="Enter your unique ID here" class="flex-1 bg-gray-900 text-white placeholder-gray-400 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button onclick="saveUserId()" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold shadow-lg hover:bg-blue-700 transition-colors duration-200 w-full md:w-auto">
+                Save User ID
+            </button>
+        </section>
+
+        <!-- Day Selection Buttons -->
+        <section class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+            <button onclick="selectDay('Push Day')" data-day="Push Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+                Monday (Push)
+            </button>
+            <button onclick="selectDay('Pull Day')" data-day="Pull Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+                Tuesday (Pull)
+            </button>
+            <button onclick="selectDay('Leg Day')" data-day="Leg Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+                Wednesday (Legs)
+            </button>
+            <button onclick="selectDay('Push Day')" data-day="Push Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+                Thursday (Push)
+            </button>
+            <button onclick="selectDay('Pull Day')" data-day="Pull Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+                Friday (Pull)
+            </button>
+            <button onclick="selectDay('Spin Class')" data-day="Spin Class" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+                Saturday (Cardio)
+            </button>
+            <button onclick="selectDay('Rest Day')" data-day="Rest Day" class="day-btn bg-gray-700 text-white p-4 rounded-xl shadow-md font-bold hover:bg-gray-600 transition-colors duration-200">
+                Sunday (Rest)
+            </button>
+        </section>
+
+        <!-- Exercise Type Selection Buttons -->
+        <section id="exerciseTypeButtons" class="hidden flex justify-center space-x-4 my-4">
+            <button onclick="selectExerciseType('compound')" data-type="compound" class="type-btn bg-gray-700 text-white px-6 py-2 rounded-lg font-bold shadow-md hover:bg-gray-600 transition-colors duration-200">
+                Compound
+            </button>
+            <button onclick="selectExerciseType('isolated')" data-type="isolated" class="type-btn bg-gray-700 text-white px-6 py-2 rounded-lg font-bold shadow-md hover:bg-gray-600 transition-colors duration-200">
+                Isolated
+            </button>
+        </section>
+
+        <!-- Exercise Display Section -->
+        <section>
+            <h2 class="text-2xl font-bold text-white mb-4">Exercises</h2>
+            <div id="exerciseContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="bg-gray-700 p-6 rounded-xl shadow-lg flex justify-center items-center text-gray-400">
+                    <p>Select a day to see your workout plan.</p>
+                </div>
+            </div>
+        </section>
+    </main>
+</body>
+</html>
